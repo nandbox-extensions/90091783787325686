@@ -1,0 +1,4 @@
+target/
+token.properties
+*.class
+*.log
