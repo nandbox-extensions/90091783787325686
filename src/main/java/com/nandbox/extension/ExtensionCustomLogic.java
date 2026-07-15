@@ -28,7 +28,7 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
         String display;         // what to show in output cell
         String current;         // current number being entered (string form)
         BigDecimal acc;         // left operand / accumulator
-        String op;              // pending operator: + - x /
+        String op;              // pending operator
         boolean error;
         boolean justEvaluated;  // true immediately after '='
 
@@ -157,6 +157,16 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
             return;
         }
 
+        // Back button: remove last entered digit from current entry
+        if ("back".equals(cb)) {
+            if (st.current != null && st.current.length() > 0) {
+                st.current = st.current.substring(0, st.current.length() - 1);
+            }
+            st.display = buildEquationDisplay(st);
+            log("applyInput", "back pressed => state(after)=" + st);
+            return;
+        }
+
         if (st.error) {
             resetState(st);
             log("applyInput", "state cleared after error");
@@ -179,7 +189,6 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
                 st.current = st.current + cb;
             }
 
-            // Show whole equation (if any)
             st.display = buildEquationDisplay(st);
             log("applyInput", "digit => state(after)=" + st);
             return;
@@ -240,7 +249,7 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
             // Set/replace operator
             st.op = cb;
 
-            // Display equation so far: "<acc> <op>"
+            // Show equation so far
             st.display = buildEquationDisplay(st);
             log("applyInput", "operator => state(after)=" + st);
             return;
@@ -258,7 +267,7 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
                 return;
             }
 
-            // If no operator: just finalize what we have (no invented '1')
+            // If no operator: just finalize what we have
             if (st.op == null) {
                 if (st.current != null && st.current.length() > 0) {
                     st.display = st.current;
@@ -289,7 +298,6 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
                 st.acc = BigDecimal.ZERO;
             }
 
-            // Show full equation once before result
             String eq = format(st.acc) + " " + st.op + " " + st.current;
             log("applyInput", "equal pressed, equation=" + eq);
 
@@ -303,7 +311,7 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
             st.op = null;
             st.display = eq + " = " + format(st.acc);
 
-            // clear current after '=' as requested
+            // clear current after '='
             st.current = "";
             st.justEvaluated = true;
             log("applyInput", "equal evaluated => state(after)=" + st);
@@ -315,14 +323,6 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
 
     private String buildEquationDisplay(CalcState st) {
         // Displays the equation being built, but does not compute here.
-        // Cases:
-        // - only current: "123"
-        // - acc + op: "5 +"
-        // - acc + op + current: "5 + 2"
-        if (st == null) {
-            return "0";
-        }
-
         String accStr = (st.acc == null) ? null : format(st.acc);
         String curStr = (st.current == null || st.current.length() == 0) ? null : st.current;
         String opStr = (st.op == null || st.op.length() == 0) ? null : st.op;
