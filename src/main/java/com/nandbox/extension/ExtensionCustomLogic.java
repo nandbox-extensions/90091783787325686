@@ -25,12 +25,12 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
     private Nandbox.Api api;
 
     private static class CalcState {
-        String display;         // what to show in output cell
-        String current;         // current number being entered (string form)
-        BigDecimal acc;         // left operand / accumulator
-        String op;              // pending operator
+        String display;         // output cell headline
+        String current;         // number being typed (string)
+        BigDecimal acc;         // accumulator / left operand
+        String op;              // pending operator: + - x /
         boolean error;
-        boolean justEvaluated;  // true immediately after '='
+        boolean justEvaluated;
 
         CalcState() {
             this.display = "0";
@@ -157,11 +157,9 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
             return;
         }
 
-        // Back button: remove last entered digit from current entry
+        // Back button: undo sequentially
         if ("back".equals(cb)) {
-            if (st.current != null && st.current.length() > 0) {
-                st.current = st.current.substring(0, st.current.length() - 1);
-            }
+            applyBack(st);
             st.display = buildEquationDisplay(st);
             log("applyInput", "back pressed => state(after)=" + st);
             return;
@@ -311,7 +309,6 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
             st.op = null;
             st.display = eq + " = " + format(st.acc);
 
-            // clear current after '='
             st.current = "";
             st.justEvaluated = true;
             log("applyInput", "equal evaluated => state(after)=" + st);
@@ -321,8 +318,70 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
         log("applyInput", "unknown cb ignored: " + cb);
     }
 
+    private void applyBack(CalcState st) {
+        log("applyBack", "before=" + st);
+
+        // Undo order:
+        // 1) remove last char from current
+        // 2) else remove operator
+        // 3) else remove last char from accumulator
+        // After all cleared => display 0 and current "0"
+
+        if (st.current != null && st.current.length() > 0) {
+            st.current = st.current.substring(0, st.current.length() - 1);
+            if (st.current.length() == 0) {
+                st.current = "0";
+            }
+            log("applyBack", "removed from current => " + st);
+            return;
+        }
+
+        if (st.op != null && st.op.length() > 0) {
+            st.op = null;
+            log("applyBack", "removed operator => " + st);
+            return;
+        }
+
+        if (st.acc != null) {
+            String accText = format(st.acc);
+            if (accText != null && accText.length() > 0) {
+                accText = accText.substring(0, accText.length() - 1);
+            }
+            if (accText == null || accText.length() == 0 || "-".equals(accText) || ".".equals(accText) || "-.".equals(accText)) {
+                st.acc = null;
+                st.current = "0";
+                st.op = null;
+                st.display = "0";
+                log("applyBack", "cleared acc => " + st);
+                return;
+            }
+
+            BigDecimal newAcc = parseBigDecimalSafe(accText);
+            if (newAcc == null) {
+                st.acc = null;
+                st.current = "0";
+                st.op = null;
+                st.display = "0";
+                log("applyBack", "acc parse failed, cleared => " + st);
+                return;
+            }
+
+            st.acc = newAcc;
+            log("applyBack", "removed from acc => " + st);
+            return;
+        }
+
+        // Nothing to undo
+        st.current = "0";
+        st.display = "0";
+        st.op = null;
+        st.acc = null;
+        st.justEvaluated = false;
+        st.error = false;
+        log("applyBack", "nothing left, reset to 0 => " + st);
+    }
+
     private String buildEquationDisplay(CalcState st) {
-        // Displays the equation being built, but does not compute here.
         String accStr = (st.acc == null) ? null : format(st.acc);
         String curStr = (st.current == null || st.current.length() == 0) ? null : st.current;
         String opStr = (st.op == null || st.op.length() == 0) ? null : st.op;
