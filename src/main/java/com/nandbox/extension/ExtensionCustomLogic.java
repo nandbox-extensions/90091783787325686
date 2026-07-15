@@ -25,9 +25,9 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
     private Nandbox.Api api;
 
     private static class CalcState {
-        String display;         // what to show
+        String display;         // what to show in output cell
         String current;         // current number being entered (string form)
-        BigDecimal acc;         // accumulator / left operand
+        BigDecimal acc;         // left operand / accumulator
         String op;              // pending operator: + - x /
         boolean error;
         boolean justEvaluated;  // true immediately after '='
@@ -83,6 +83,7 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
     @Override
     public void onConnect(Nandbox.Api api) {
         this.api = api;
+        log("onConnect", "connected");
     }
 
     @Override
@@ -117,7 +118,7 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
             stateByUser.put(userId, st);
         }
 
-        log("onMenuCallBack", "userId=" + userId + ", menuId=" + menuId + ", callback=" + callback + ", before=" + st);
+        log("onMenuCallBack", "userId=" + userId + ", callback=" + callback + ", before=" + st);
 
         applyInput(st, callback);
 
@@ -135,9 +136,11 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
     }
 
     private String findFirstCallback(List cells) {
+        log("findFirstCallback", "cells.size=" + cells.size());
         for (int i = 0; i < cells.size(); i++) {
             MenuCallback.Cell cell = (MenuCallback.Cell) cells.get(i);
             if (cell != null && cell.getCallback() != null && cell.getCallback().length() > 0) {
+                log("findFirstCallback", "found callback=" + cell.getCallback());
                 return cell.getCallback();
             }
         }
@@ -147,7 +150,7 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
     private void applyInput(CalcState st, String cb) {
         log("applyInput", "cb=" + cb + ", state(before)=" + st);
 
-        // Added Reset button support: callback may be "C" or "reset" depending on menu.
+        // Reset button support (common callbacks)
         if ("C".equals(cb) || "reset".equals(cb) || "Reset".equals(cb) || "clear".equals(cb)) {
             resetState(st);
             log("applyInput", "reset pressed, state(after)=" + st);
@@ -155,16 +158,17 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
         }
 
         if (st.error) {
-            // reset after error on next press
             resetState(st);
             log("applyInput", "state cleared after error");
         }
 
+        // Digits
         if (isDigit(cb)) {
             if (st.justEvaluated) {
-                // start new calculation when typing after '='
+                // Start new expression after '=' when user types a number
                 resetState(st);
                 st.justEvaluated = false;
+                log("applyInput", "new entry after '='");
             }
 
             if (st.current == null || st.current.length() == 0) {
@@ -174,15 +178,19 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
             } else {
                 st.current = st.current + cb;
             }
-            st.display = st.current;
+
+            // Show whole equation (if any)
+            st.display = buildEquationDisplay(st);
             log("applyInput", "digit => state(after)=" + st);
             return;
         }
 
+        // Dot
         if (".".equals(cb)) {
             if (st.justEvaluated) {
                 resetState(st);
                 st.justEvaluated = false;
+                log("applyInput", "new entry after '=' with dot");
             }
 
             if (st.current == null || st.current.length() == 0) {
@@ -190,16 +198,17 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
             } else if (st.current.indexOf('.') < 0) {
                 st.current = st.current + ".";
             }
-            st.display = st.current;
+
+            st.display = buildEquationDisplay(st);
             log("applyInput", "dot => state(after)=" + st);
             return;
         }
 
+        // Operators
         if (isOperator(cb)) {
-            // If user presses operator right after '=', keep accumulator and start chaining.
             st.justEvaluated = false;
 
-            // Fold current into accumulator (if any)
+            // If user is entering a number, commit it to acc or compute intermediate result
             if (st.current != null && st.current.length() > 0) {
                 BigDecimal cur = parseBigDecimalSafe(st.current);
                 if (cur == null) {
@@ -222,22 +231,24 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
 
                 st.current = "";
             } else {
-                // No current digits. If no accumulator, assume 0 as left operand.
+                // No current: if acc is null, assume 0 as left operand
                 if (st.acc == null) {
                     st.acc = BigDecimal.ZERO;
                 }
             }
 
+            // Set/replace operator
             st.op = cb;
-            st.display = format(st.acc);
+
+            // Display equation so far: "<acc> <op>"
+            st.display = buildEquationDisplay(st);
             log("applyInput", "operator => state(after)=" + st);
             return;
         }
 
+        // Equals: calculate only here
         if ("=".equals(cb)) {
-            // Important: '=' should never invent a number or show '1' by default.
-            // It must evaluate only when we have acc, op, and a right operand.
-
+            // If nothing entered, keep display at 0
             if (st.acc == null && (st.current == null || st.current.length() == 0)) {
                 st.display = "0";
                 st.current = "";
@@ -247,7 +258,7 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
                 return;
             }
 
-            // If there is no pending operator, just finalize current into display and clear current.
+            // If no operator: just finalize what we have (no invented '1')
             if (st.op == null) {
                 if (st.current != null && st.current.length() > 0) {
                     st.display = st.current;
@@ -256,13 +267,13 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
                 } else {
                     st.display = "0";
                 }
-                st.current = ""; // clear after '=' as requested
+                st.current = ""; // clear current after '='
                 st.justEvaluated = true;
                 log("applyInput", "equal without op => state(after)=" + st);
                 return;
             }
 
-            // Need a right operand
+            // Need right operand
             if (st.current == null || st.current.length() == 0) {
                 setError(st, "Missing operand");
                 return;
@@ -275,9 +286,12 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
             }
 
             if (st.acc == null) {
-                // If user typed operator first then right operand, assume left=0
                 st.acc = BigDecimal.ZERO;
             }
+
+            // Show full equation once before result
+            String eq = format(st.acc) + " " + st.op + " " + st.current;
+            log("applyInput", "equal pressed, equation=" + eq);
 
             BigDecimal res2 = eval(st.acc, right, st.op);
             if (res2 == null) {
@@ -287,7 +301,7 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
 
             st.acc = res2;
             st.op = null;
-            st.display = format(st.acc);
+            st.display = eq + " = " + format(st.acc);
 
             // clear current after '=' as requested
             st.current = "";
@@ -299,13 +313,44 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
         log("applyInput", "unknown cb ignored: " + cb);
     }
 
+    private String buildEquationDisplay(CalcState st) {
+        // Displays the equation being built, but does not compute here.
+        // Cases:
+        // - only current: "123"
+        // - acc + op: "5 +"
+        // - acc + op + current: "5 + 2"
+        if (st == null) {
+            return "0";
+        }
+
+        String accStr = (st.acc == null) ? null : format(st.acc);
+        String curStr = (st.current == null || st.current.length() == 0) ? null : st.current;
+        String opStr = (st.op == null || st.op.length() == 0) ? null : st.op;
+
+        if (accStr == null && curStr == null) {
+            return "0";
+        }
+        if (accStr == null) {
+            return curStr;
+        }
+        if (opStr == null) {
+            return accStr;
+        }
+        if (curStr == null) {
+            return accStr + " " + opStr;
+        }
+        return accStr + " " + opStr + " " + curStr;
+    }
+
     private void resetState(CalcState st) {
+        log("resetState", "before=" + st);
         st.display = "0";
         st.current = "";
         st.acc = null;
         st.op = null;
         st.error = false;
         st.justEvaluated = false;
+        log("resetState", "after=" + st);
     }
 
     private boolean isDigit(String cb) {
