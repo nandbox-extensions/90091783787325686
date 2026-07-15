@@ -321,27 +321,40 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
     private void applyBack(CalcState st) {
         log("applyBack", "before=" + st);
 
-        // Undo order:
-        // 1) remove last char from current
-        // 2) else remove operator
-        // 3) else remove last char from accumulator
-        // After all cleared => display 0 and current "0"
+        // Desired behavior:
+        // - Repeated presses undo sequentially.
+        // - Remove digits from current; when current becomes empty, remove operator on next press.
+        // - After removing operator, undo accumulator digits.
+        // - If nothing left, show 0.
 
+        // 1) Remove from current if it has any characters (including "0")
         if (st.current != null && st.current.length() > 0) {
             st.current = st.current.substring(0, st.current.length() - 1);
+
+            // If current is now empty, do NOT force it to "0" if there is an operator.
+            // This allows the next back press to remove the operator cleanly.
             if (st.current.length() == 0) {
-                st.current = "0";
+                if (st.op == null && st.acc == null) {
+                    st.current = "0";
+                }
             }
+
             log("applyBack", "removed from current => " + st);
             return;
         }
 
+        // 2) Remove operator
         if (st.op != null && st.op.length() > 0) {
             st.op = null;
+            // if everything else is empty, show 0
+            if (st.acc == null && (st.current == null || st.current.length() == 0)) {
+                st.current = "0";
+            }
             log("applyBack", "removed operator => " + st);
             return;
         }
 
+        // 3) Remove from accumulator
         if (st.acc != null) {
             String accText = format(st.acc);
             if (accText != null && accText.length() > 0) {
@@ -371,7 +384,7 @@ public class ExtensionCustomLogic extends ExtensionAdapter {
             return;
         }
 
-        // Nothing to undo
+        // 4) Nothing to undo
         st.current = "0";
         st.display = "0";
         st.op = null;
